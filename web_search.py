@@ -560,7 +560,7 @@ def search_parallel(query: str, num: int = DEFAULT_NUM, news: bool = False) -> d
     if TAVILY_API_KEY:
         layers["tavily"] = lambda: search_tavily(query, num, news)
 
-    with ThreadPoolExecutor(max_workers=len(layers)) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         futures = {pool.submit(fn): name for name, fn in layers.items()}
         all_results, layers_tried = [], []
         for future in as_completed(futures, timeout=max(SEARXNG_TIMEOUT, DDGS_TIMEOUT) + 2):
