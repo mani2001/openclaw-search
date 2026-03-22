@@ -26,7 +26,8 @@ python3 search_health.py                           # health check
 ## Requirements
 - Python 3.10+
 - SearXNG instance (localhost:8888) recommended
-- Optional: Brave API key for enhanced results
+- Optional: Brave API key (`BRAVE_API_KEY`) for enhanced results
+- Optional: Tavily API key (`TAVILY_API_KEY`) for Tavily search source
 - ddgr tool for fallback
 
 ## License

@@ -422,7 +422,7 @@ class SearchEngine:
                 used_source = 'brave'
 
         # Try Tavily if applicable
-        if source in ['tavily'] or (source in ['auto', 'all'] and self._get_env_var('TAVILY_API_KEY')):
+        if source == 'tavily' or source == 'all' or (source == 'auto' and (not results or len(results) < 3) and self._get_env_var('TAVILY_API_KEY')):
             tavily_results = self._search_tavily(query, num_results * 2)
             if source == 'tavily':
                 results = tavily_results
