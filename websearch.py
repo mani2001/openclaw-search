@@ -124,10 +124,30 @@ def _search_duckduckgo(query: str, num: int = 5) -> list[dict]:
     return results
 
 
+def _search_tavily(query: str, num: int = 5) -> list[dict]:
+    """QUATERNARY: Search via Tavily API (requires TAVILY_API_KEY)."""
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        return []
+    from tavily import TavilyClient
+    client = TavilyClient(api_key=api_key)
+    response = client.search(query=query, max_results=num)
+    results = []
+    for r in response.get("results", []):
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("content", ""),
+            "source": "tavily",
+        })
+    return results
+
+
 _BACKENDS = [
     ("searxng", _search_searxng),
     ("ddgr", _search_ddgr),
     ("duckduckgo", _search_duckduckgo),
+    ("tavily", _search_tavily),
 ]
 
 
@@ -258,7 +278,7 @@ def main():
     parser.add_argument("--deep", type=int, metavar="N", help="Fetch top N results content")
     parser.add_argument("--summarize", action="store_true", help="Use TaskForge to summarize fetched content in parallel")
     parser.add_argument("--all", action="store_true", dest="search_all", help="Search all sources and merge results")
-    parser.add_argument("--source", choices=["searxng", "ddgr", "duckduckgo"], help="Force a specific search source")
+    parser.add_argument("--source", choices=["searxng", "ddgr", "duckduckgo", "tavily"], help="Force a specific search source")
     parser.add_argument("--format", choices=["json", "markdown", "text"], default="json", dest="fmt", help="Output format")
     args = parser.parse_args()
 
