@@ -413,11 +413,19 @@ def search_ddgr(query: str, num: int = DEFAULT_NUM) -> list:
     except: return []
 
 # === LAYER 5: Tavily ===
-def search_tavily(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
-    if not TAVILY_API_KEY: return []
-    try:
+_tavily_client = None
+
+def _get_tavily_client():
+    global _tavily_client
+    if _tavily_client is None and TAVILY_API_KEY:
         from tavily import TavilyClient
-        client = TavilyClient(api_key=TAVILY_API_KEY)
+        _tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
+    return _tavily_client
+
+def search_tavily(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
+    client = _get_tavily_client()
+    if not client: return []
+    try:
         kwargs = {"query": query, "max_results": min(num, 20), "search_depth": "basic"}
         if news:
             kwargs["topic"] = "news"
