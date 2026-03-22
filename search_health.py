@@ -9,6 +9,7 @@ Usage:
 """
 
 import json
+import os
 import sys
 import time
 import subprocess
@@ -60,16 +61,33 @@ def check_ddgr() -> dict:
     except Exception as e:
         return {"status": "down", "error": str(e)}
 
+def check_tavily() -> dict:
+    api_key = os.environ.get("TAVILY_API_KEY")
+    if not api_key:
+        return {"status": "not_configured"}
+    try:
+        t0 = time.time()
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=api_key)
+        response = client.search(query="health check", max_results=1, search_depth="basic")
+        ms = int((time.time() - t0) * 1000)
+        results = response.get("results", [])
+        return {"status": "ok" if results else "empty", "latency_ms": ms, "results": len(results)}
+    except Exception as e:
+        return {"status": "down", "error": str(e)}
+
 def main():
     results = {
         "searxng": check_searxng(),
         "ddgs": check_ddgs(),
         "ddgr": check_ddgr(),
+        "tavily": check_tavily(),
     }
-    
-    # Count healthy layers
-    healthy = sum(1 for v in results.values() if v["status"] == "ok")
-    total = len(results)
+
+    # Count healthy layers (exclude 'not_configured' from totals)
+    configured = {k: v for k, v in results.items() if v["status"] != "not_configured"}
+    healthy = sum(1 for v in configured.values() if v["status"] == "ok")
+    total = len(configured)
     
     # Alert level
     if healthy == 0:
@@ -85,7 +103,7 @@ def main():
         "healthy_layers": f"{healthy}/{total}",
         "layers": results,
         "message": f"Search: {healthy}/{total} layers healthy" + (
-            f" — DOWN: {[k for k,v in results.items() if v['status'] != 'ok']}" if alert != "ok" else ""
+            f" — DOWN: {[k for k,v in configured.items() if v['status'] != 'ok']}" if alert != "ok" else ""
         ),
     }
     
