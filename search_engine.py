@@ -185,6 +185,31 @@ class SearchEngine:
         
         return []
 
+    def _search_tavily(self, query: str, num_results: int = 10) -> List[Dict]:
+        """Search using Tavily API."""
+        tavily_key = self._get_env_var('TAVILY_API_KEY')
+        if not tavily_key:
+            return []
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=tavily_key)
+            response = client.search(
+                query=query,
+                max_results=num_results,
+                search_depth="basic",
+            )
+            results = []
+            for result in response.get('results', []):
+                results.append({
+                    'title': result.get('title', ''),
+                    'url': result.get('url', ''),
+                    'snippet': result.get('content', ''),
+                    'engine': 'tavily',
+                })
+            return results
+        except Exception:
+            return []
+
     def _get_env_var(self, name: str) -> Optional[str]:
         """Get environment variable."""
         import os
@@ -395,7 +420,24 @@ class SearchEngine:
             elif not results:
                 results = brave_results
                 used_source = 'brave'
-        
+
+        # Try Tavily if applicable
+        if source in ['tavily'] or (source in ['auto', 'all'] and self._get_env_var('TAVILY_API_KEY')):
+            tavily_results = self._search_tavily(query, num_results * 2)
+            if source == 'tavily':
+                results = tavily_results
+                used_source = 'tavily'
+            elif source == 'all' and tavily_results:
+                results.extend(tavily_results)
+                used_source = (used_source + '+tavily') if used_source != 'none' else 'tavily'
+            elif source == 'auto' and (not results or len(results) < 3) and tavily_results:
+                if not results:
+                    results = tavily_results
+                    used_source = 'tavily'
+                else:
+                    results.extend(tavily_results)
+                    used_source = used_source + '+tavily'
+
         if not results:
             error_msg = "SearXNG unavailable, use --source brave" if source == 'searxng' else "No results found"
             return {'results': [], 'source': used_source, 'error': error_msg}
@@ -495,7 +537,7 @@ def main():
     parser.add_argument('query', nargs='?', help='Search query')
     parser.add_argument('--deep', type=int, metavar='N', help='Fetch content from top N URLs')
     parser.add_argument('--summarize', action='store_true', help='Summarize findings via LLM')
-    parser.add_argument('--source', choices=['searxng', 'brave', 'all', 'auto'], 
+    parser.add_argument('--source', choices=['searxng', 'brave', 'tavily', 'all', 'auto'],
                        default='auto', help='Search source to use')
     parser.add_argument('--num', type=int, default=5, help='Number of results to show')
     parser.add_argument('--cache-only', action='store_true', help='Search cache only')
