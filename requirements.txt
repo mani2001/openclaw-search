@@ -1,1 +1,3 @@
-tavily-python
+# Runtime dependencies for openclaw-search
+# Note: ddgs and ddgr are also required but may be installed via system packages
+tavily-python>=0.3.0,<1.0
