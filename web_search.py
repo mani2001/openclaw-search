@@ -20,6 +20,7 @@ Couches:
   2. Brave API directe — 2000/mois free (si BRAVE_API_KEY set)
   3. DDGS Python — DuckDuckGo illimité
   4. ddgr CLI — DuckDuckGo CLI illimité
+  5. Tavily API — LLM-optimized search (si TAVILY_API_KEY set)
 
 v4.0 — 2026-03-19
 v4.1 — 2026-03-19 — Query quality validator (strict by default, --no-validate to bypass)
@@ -41,6 +42,7 @@ DDGS_TIMEOUT = 10
 DDGR_TIMEOUT = 10
 BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 BRAVE_API_URL = "https://api.search.brave.com/res/v1/web/search"
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 CACHE_DIR = Path.home() / ".cache" / "web_search"
 METRICS_DB = CACHE_DIR / "metrics.db"
 DEFAULT_NUM = 8
@@ -410,6 +412,22 @@ def search_ddgr(query: str, num: int = DEFAULT_NUM) -> list:
         return results[:num]
     except: return []
 
+# === LAYER 5: Tavily ===
+def search_tavily(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
+    if not TAVILY_API_KEY: return []
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        kwargs = {"query": query, "max_results": min(num, 20), "search_depth": "basic"}
+        if news:
+            kwargs["topic"] = "news"
+        response = client.search(**kwargs)
+        return [{"title": item.get("title", ""), "url": item.get("url", ""),
+                 "content": item.get("content", "")[:300], "source": "tavily",
+                 "score": item.get("score", 0)}
+                for item in response.get("results", [])[:num]]
+    except: return []
+
 # === CONTENT EXTRACTION ===
 def extract_content(url: str, max_chars: int = EXTRACT_MAX_CHARS) -> str:
     """Fetch and extract readable content from a URL"""
@@ -531,8 +549,10 @@ def search_parallel(query: str, num: int = DEFAULT_NUM, news: bool = False) -> d
               "ddgr": lambda: search_ddgr(query, num)}
     if BRAVE_API_KEY:
         layers["brave_api"] = lambda: search_brave_api(query, num, news)
+    if TAVILY_API_KEY:
+        layers["tavily"] = lambda: search_tavily(query, num, news)
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=len(layers)) as pool:
         futures = {pool.submit(fn): name for name, fn in layers.items()}
         all_results, layers_tried = [], []
         for future in as_completed(futures, timeout=max(SEARXNG_TIMEOUT, DDGS_TIMEOUT) + 2):
@@ -587,7 +607,7 @@ def search(query: str, num: int = DEFAULT_NUM, deep: bool = False, news: bool = 
 
     # Check cache
     if not deep:
-        for src in ["searxng", "ddgs", "ddgr", "brave_api"]:
+        for src in ["searxng", "ddgs", "ddgr", "brave_api", "tavily"]:
             cached = _cache_get(query, src, news)
             if cached:
                 _metrics_log(query, f"cache:{src}", len(cached), 0, cached=True)
@@ -622,6 +642,8 @@ def search(query: str, num: int = DEFAULT_NUM, deep: bool = False, news: bool = 
         ("ddgs", lambda q: search_ddgs(q, num, news)),
         ("ddgr", lambda q: search_ddgr(q, num)),
     ]
+    if TAVILY_API_KEY:
+        layers.append(("tavily", lambda q: search_tavily(q, num, news)))
 
     t0 = time.time()
     layers_tried, all_results = [], []
@@ -773,6 +795,17 @@ def health_check() -> dict:
         status["ddgr"] = f"✅ OK ({ms}ms)" if proc.returncode == 0 else f"⚠️ exit {proc.returncode}"
     except FileNotFoundError: status["ddgr"] = "❌ NOT INSTALLED"
     except Exception as e: status["ddgr"] = f"❌ ({e})"
+
+    # Tavily
+    if TAVILY_API_KEY:
+        try:
+            t0 = time.time()
+            r = search_tavily("test", 1)
+            ms = int((time.time()-t0)*1000)
+            status["tavily"] = f"✅ OK ({ms}ms)" if r else f"⚠️ EMPTY ({ms}ms)"
+        except Exception as e: status["tavily"] = f"❌ ERROR ({e})"
+    else:
+        status["tavily"] = "⚪ No API key (set TAVILY_API_KEY)"
 
     # Qwen3-8B (for expand)
     try:
