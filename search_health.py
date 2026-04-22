@@ -9,12 +9,14 @@ Usage:
 """
 
 import json
+import os
 import sys
 import time
 import subprocess
 import urllib.request
 
 SEARXNG_URL = "http://localhost:8888/search"
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 
 def check_searxng() -> dict:
     try:
@@ -60,9 +62,24 @@ def check_ddgr() -> dict:
     except Exception as e:
         return {"status": "down", "error": str(e)}
 
+def check_tavily() -> dict:
+    if not TAVILY_API_KEY:
+        return {"status": "no_key"}
+    try:
+        t0 = time.time()
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        response = client.search(query="health check", max_results=1, search_depth="basic")
+        ms = int((time.time() - t0) * 1000)
+        results_count = len(response.get("results", []))
+        return {"status": "ok" if results_count > 0 else "empty", "latency_ms": ms, "results": results_count}
+    except Exception as e:
+        return {"status": "down", "error": str(e)}
+
 def main():
     results = {
         "searxng": check_searxng(),
+        "tavily": check_tavily(),
         "ddgs": check_ddgs(),
         "ddgr": check_ddgr(),
     }

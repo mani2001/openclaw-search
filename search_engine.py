@@ -129,6 +129,32 @@ class SearchEngine:
         except Exception:
             return []
 
+    def _search_tavily(self, query: str, num_results: int = 10) -> List[Dict]:
+        """Search using Tavily API."""
+        tavily_key = self._get_env_var('TAVILY_API_KEY')
+        if not tavily_key:
+            return []
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=tavily_key)
+            response = client.search(
+                query=query,
+                max_results=min(num_results, 20),
+                search_depth="basic",
+                topic="general",
+            )
+            results = []
+            for item in response.get('results', []):
+                results.append({
+                    'title': item.get('title', ''),
+                    'url': item.get('url', ''),
+                    'snippet': item.get('content', ''),
+                    'engine': 'tavily'
+                })
+            return results
+        except Exception:
+            return []
+
     def _search_brave(self, query: str, num_results: int = 10) -> List[Dict]:
         """Search using Brave API or websearch.py fallback."""
         # Try direct Brave API first if key is available
@@ -386,6 +412,16 @@ class SearchEngine:
             if results:
                 used_source = 'searxng'
         
+        # Fallback to Tavily if needed
+        if (not results or len(results) < 3) and source in ['auto', 'tavily', 'all']:
+            tavily_results = self._search_tavily(query, num_results * 2)
+            if source == 'all':
+                results.extend(tavily_results)
+                used_source = used_source + '+tavily' if used_source != 'none' else 'tavily'
+            elif not results:
+                results = tavily_results
+                used_source = 'tavily'
+
         # Fallback to Brave if needed
         if (not results or len(results) < 3) and source in ['auto', 'brave', 'all']:
             brave_results = self._search_brave(query, num_results * 2)
@@ -495,7 +531,7 @@ def main():
     parser.add_argument('query', nargs='?', help='Search query')
     parser.add_argument('--deep', type=int, metavar='N', help='Fetch content from top N URLs')
     parser.add_argument('--summarize', action='store_true', help='Summarize findings via LLM')
-    parser.add_argument('--source', choices=['searxng', 'brave', 'all', 'auto'], 
+    parser.add_argument('--source', choices=['searxng', 'tavily', 'brave', 'all', 'auto'],
                        default='auto', help='Search source to use')
     parser.add_argument('--num', type=int, default=5, help='Number of results to show')
     parser.add_argument('--cache-only', action='store_true', help='Search cache only')

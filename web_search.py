@@ -17,9 +17,10 @@ Usage:
 
 Couches:
   1. SearXNG (localhost:8888) — 10+ engines weighted
-  2. Brave API directe — 2000/mois free (si BRAVE_API_KEY set)
-  3. DDGS Python — DuckDuckGo illimité
-  4. ddgr CLI — DuckDuckGo CLI illimité
+  2. Tavily API — cloud search for LLMs (si TAVILY_API_KEY set)
+  3. Brave API directe — 2000/mois free (si BRAVE_API_KEY set)
+  4. DDGS Python — DuckDuckGo illimité
+  5. ddgr CLI — DuckDuckGo CLI illimité
 
 v4.0 — 2026-03-19
 v4.1 — 2026-03-19 — Query quality validator (strict by default, --no-validate to bypass)
@@ -41,6 +42,7 @@ DDGS_TIMEOUT = 10
 DDGR_TIMEOUT = 10
 BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 BRAVE_API_URL = "https://api.search.brave.com/res/v1/web/search"
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 CACHE_DIR = Path.home() / ".cache" / "web_search"
 METRICS_DB = CACHE_DIR / "metrics.db"
 DEFAULT_NUM = 8
@@ -363,7 +365,26 @@ def search_searxng(query: str, num: int = DEFAULT_NUM, news: bool = False) -> li
                 for item in data.get("results",[])[:num]]
     except: return []
 
-# === LAYER 2: Brave API Direct ===
+# === LAYER 2: Tavily API ===
+def search_tavily(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
+    if not TAVILY_API_KEY: return []
+    try:
+        from tavily import TavilyClient
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        topic = "news" if news else "general"
+        response = client.search(
+            query=query,
+            max_results=min(num, 20),
+            search_depth="basic",
+            topic=topic,
+        )
+        return [{"title": item.get("title", ""), "url": item.get("url", ""),
+                 "content": item.get("content", "")[:300], "source": "tavily",
+                 "score": item.get("score", 0)}
+                for item in response.get("results", [])[:num]]
+    except: return []
+
+# === LAYER 3: Brave API Direct ===
 def search_brave_api(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
     if not BRAVE_API_KEY: return []
     try:
@@ -383,7 +404,7 @@ def search_brave_api(query: str, num: int = DEFAULT_NUM, news: bool = False) -> 
         return results
     except: return []
 
-# === LAYER 3: DDGS Python ===
+# === LAYER 4: DDGS Python ===
 def search_ddgs(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
     try:
         from ddgs import DDGS
@@ -393,7 +414,7 @@ def search_ddgs(query: str, num: int = DEFAULT_NUM, news: bool = False) -> list:
                  "content": item.get("body", item.get("excerpt",""))[:300], "source": "ddgs"} for item in raw]
     except: return []
 
-# === LAYER 4: ddgr CLI ===
+# === LAYER 5: ddgr CLI ===
 def search_ddgr(query: str, num: int = DEFAULT_NUM) -> list:
     try:
         proc = subprocess.run(["ddgr", "--noprompt", "--num", str(num), query],
@@ -529,6 +550,8 @@ def search_parallel(query: str, num: int = DEFAULT_NUM, news: bool = False) -> d
     layers = {"searxng": lambda: search_searxng(query, num * 2, news),
               "ddgs": lambda: search_ddgs(query, num, news),
               "ddgr": lambda: search_ddgr(query, num)}
+    if TAVILY_API_KEY:
+        layers["tavily"] = lambda: search_tavily(query, num, news)
     if BRAVE_API_KEY:
         layers["brave_api"] = lambda: search_brave_api(query, num, news)
 
@@ -587,7 +610,7 @@ def search(query: str, num: int = DEFAULT_NUM, deep: bool = False, news: bool = 
 
     # Check cache
     if not deep:
-        for src in ["searxng", "ddgs", "ddgr", "brave_api"]:
+        for src in ["searxng", "tavily", "ddgs", "ddgr", "brave_api"]:
             cached = _cache_get(query, src, news)
             if cached:
                 _metrics_log(query, f"cache:{src}", len(cached), 0, cached=True)
@@ -618,6 +641,7 @@ def search(query: str, num: int = DEFAULT_NUM, deep: bool = False, news: bool = 
     # Sequential with fallback
     layers = [
         ("searxng", lambda q: search_searxng(q, num * 2, news)),
+        ("tavily", lambda q: search_tavily(q, num, news)),
         ("brave_api", lambda q: search_brave_api(q, num, news)),
         ("ddgs", lambda q: search_ddgs(q, num, news)),
         ("ddgr", lambda q: search_ddgr(q, num)),
@@ -745,6 +769,17 @@ def health_check() -> dict:
         unr = data.get("unresponsive_engines",[])
         if unr: status["searxng_issues"] = f"⚠️ Down: {[e[0]+':'+e[1][:20] for e in unr]}"
     except Exception as e: status["searxng"] = f"❌ DOWN ({e})"
+
+    # Tavily API
+    if TAVILY_API_KEY:
+        try:
+            t0 = time.time()
+            r = search_tavily("test", 1)
+            ms = int((time.time()-t0)*1000)
+            status["tavily"] = f"✅ OK ({ms}ms)" if r else f"⚠️ EMPTY ({ms}ms)"
+        except Exception as e: status["tavily"] = f"❌ ERROR ({e})"
+    else:
+        status["tavily"] = "⚪ No API key (set TAVILY_API_KEY)"
 
     # Brave API
     if BRAVE_API_KEY:
